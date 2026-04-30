@@ -1,18 +1,18 @@
 const mysql = require("mysql2");
 
 const db = mysql.createConnection({
-  host: "127.0.0.1",
+  host: "switchyard.proxy.rlwy.net",
   user: "root",
-  password: "admin",
-  database: "irrigation_db",
-  port: 3300
+  password: "YOUR_PASSWORD",
+  database: "railway",
+  port: 22863
 });
 
 db.connect((err) => {
   if (err) {
-    console.error("FULL ERROR:", err);
+    console.log("❌ DB ERROR:", err);
   } else {
-    console.log("MySQL Connected");
+    console.log("✅ Connected to Railway DB");
   }
 });
 
