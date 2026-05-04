@@ -196,14 +196,7 @@ app.get("/api/command", (req, res) => {
               if (err3) console.log("Log error:", err3);
             }
           );
-          // 🔥 SAVE HISTORY
-db.query(
-  "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
-  [zone, irrigate ? "ON" : "OFF", reason],
-  (err3) => {
-    if (err3) console.log("Log error:", err3);
-  }
-);
+ 
 
           res.json({ irrigate });
         }
@@ -358,15 +351,6 @@ Next irrigation: ${nextIrrigation.toLocaleString()}
     });
   });
 }
-app.get("/api/history", (req, res) => {
-  db.query(
-    "SELECT * FROM irrigation_logs ORDER BY created_at DESC LIMIT 50",
-    (err, results) => {
-      if (err) return res.status(500).json(err);
-      res.json(results);
-    }
-  );
-});
 
 // ================= INTERVAL =================
 setInterval(autoIrrigation, 5000);
