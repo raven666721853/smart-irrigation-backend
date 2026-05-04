@@ -98,12 +98,12 @@ app.post("/api/irrigation", (req, res) => {
 // 📊 HISTORY
 app.get("/api/history", (req, res) => {
   db.query(
-    "SELECT * FROM irrigation ORDER BY created_at DESC",
+    "SELECT * FROM irrigation_logs ORDER BY created_at DESC",
     (err, result) => {
       if (err) {
-  console.log("❌ HISTORY ERROR:", err);
-  return res.status(500).json(err);
-}
+        console.log("❌ HISTORY ERROR:", err);
+        return res.status(500).json(err);
+      }
       res.json(result);
     }
   );
@@ -335,7 +335,7 @@ Next irrigation: ${nextIrrigation.toLocaleString()}
 
             // 💾 SAVE
             db.query(
-              "INSERT INTO irrigation (zone, status, reason) VALUES (?, ?, ?)",
+              "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
               [zone.zone, "SMART ON", reason]
             );
 

@@ -39,18 +39,20 @@ void loop() {
 Serial.print("RAW: ");
 Serial.println(raw);
 
-int moisture = raw; // temporary (just for test)
-    moisture = map(moisture, 0, 4095, 100, 0);
+// 🎮 SIMULATED SENSOR (no real sensor)
+int moisture = random(25, 70);   // between dry and wet
+int temperature = random(20, 35);
 
-    Serial.print("Moisture: ");
-    Serial.println(moisture);
+Serial.print("Simulated Moisture: ");
+Serial.println(moisture);
 
+   
     // 📡 SEND DATA TO BACKEND
     HTTPClient http;
     http.begin(server + "/sensor");
     http.addHeader("Content-Type", "application/json");
 
-    String json = "{\"zone\":1,\"moisture\":" + String(moisture) + ",\"temperature\":25}";
+String json = "{\"zone\":1,\"moisture\":" + String(moisture) + ",\"temperature\":" + String(temperature) + "}";
 
     int postCode = http.POST(json);
 
