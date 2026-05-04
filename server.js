@@ -12,6 +12,7 @@ app.use(express.json());
 
 // ================= ROUTES =================
 
+
 // 🔐 AUTH
 app.get("/", (req, res) => {
   res.send("Backend is working 🚀");
@@ -77,22 +78,21 @@ app.get("/api/forecast", async (req, res) => {
 });
 // 💧 MANUAL IRRIGATION
 app.post("/api/irrigation", (req, res) => {
-  const { zone } = req.body;
+  const { zone, status } = req.body;
 
+  const command = status === "MANUAL ON" ? "ON" : "OFF";
+  commands[zone] = command;
+
+  // 🔥 SAVE TO DB
   db.query(
-    "INSERT INTO irrigation (zone, status, reason) VALUES (?, ?, ?)",
-    [zone, "MANUAL ON", "Manual irrigation triggered by user"],
+    "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
+    [zone, command, "MANUAL"],
     (err) => {
-      if (err) return res.status(500).send("DB error");
-
-      db.query(
-        "UPDATE zones SET moisture = moisture + 10 WHERE zone = ?",
-        [zone]
-      );
-
-      res.json({ message: "Irrigation started" });
+      if (err) console.log(err);
     }
   );
+
+  res.json({ success: true });
 });
 
 // 📊 HISTORY
@@ -159,16 +159,55 @@ app.get("/api/command", (req, res) => {
 
       const { moisture, temperature } = result[0];
 
-      let irrigate = false;
+      // 🟢 1. CHECK MANUAL COMMAND FIRST
+      db.query(
+        "SELECT status FROM irrigation WHERE zone=? ORDER BY id DESC LIMIT 1",
+        [zone],
+        (err2, last) => {
 
-      // 🌱 YOUR LOGIC
-      if (moisture < 40 || temperature > 32) {
-        irrigate = true;
-      }
+          let irrigate = false;
+          let reason = "AUTO";
 
-      console.log("🤖 Decision:", zone, irrigate);
+          if (last && last.length) {
+            const lastStatus = last[0].status;
 
-      res.json({ irrigate });
+            if (lastStatus === "MANUAL ON") {
+              irrigate = true;
+              reason = "MANUAL";
+            } else if (lastStatus === "MANUAL OFF") {
+              irrigate = false;
+              reason = "MANUAL";
+            } else {
+              // 🤖 AUTO LOGIC
+              irrigate = (moisture < 40 || temperature > 32);
+            }
+          } else {
+            // 🤖 AUTO LOGIC (no manual history)
+            irrigate = (moisture < 40 || temperature > 32);
+          }
+
+          console.log("🤖 Decision:", zone, irrigate, reason);
+
+          // 🔥 SAVE HISTORY HERE
+          db.query(
+            "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
+            [zone, irrigate ? "ON" : "OFF", reason],
+            (err3) => {
+              if (err3) console.log("Log error:", err3);
+            }
+          );
+          // 🔥 SAVE HISTORY
+db.query(
+  "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
+  [zone, irrigate ? "ON" : "OFF", reason],
+  (err3) => {
+    if (err3) console.log("Log error:", err3);
+  }
+);
+
+          res.json({ irrigate });
+        }
+      );
     }
   );
 });
@@ -319,6 +358,15 @@ Next irrigation: ${nextIrrigation.toLocaleString()}
     });
   });
 }
+app.get("/api/history", (req, res) => {
+  db.query(
+    "SELECT * FROM irrigation_logs ORDER BY created_at DESC LIMIT 50",
+    (err, results) => {
+      if (err) return res.status(500).json(err);
+      res.json(results);
+    }
+  );
+});
 
 // ================= INTERVAL =================
 setInterval(autoIrrigation, 5000);
