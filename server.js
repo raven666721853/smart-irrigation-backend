@@ -11,7 +11,7 @@ app.use(express.json());
 
 
 // ================= ROUTES =================
-
+console.log("🔥 NEW VERSION DEPLOYED");
 
 // 🔐 AUTH
 app.get("/", (req, res) => {
