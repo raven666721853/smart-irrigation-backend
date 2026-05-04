@@ -80,7 +80,7 @@ app.get("/api/forecast", async (req, res) => {
 app.post("/api/irrigation", (req, res) => {
   const { zone, status } = req.body;
 
-  const command = status === "MANUAL ON" ? "ON" : "OFF";
+  const command = status; // keep MANUAL ON / OFF
   commands[zone] = command;
 
   // 🔥 SAVE TO DB
@@ -115,7 +115,7 @@ app.get("/api/alerts", (req, res) => {
     `
     SELECT zone, moisture, 'DRY' as type FROM zones WHERE moisture < 40
     UNION
-    SELECT zone, 0 as moisture, 'SMART' as type FROM irrigation
+    SELECT zone, 0 as moisture, 'SMART' as type FROM irrigation_logs
     WHERE status = 'SMART ON'
     AND created_at >= NOW() - INTERVAL 1 MINUTE
     `,
@@ -161,7 +161,7 @@ app.get("/api/command", (req, res) => {
 
       // 🟢 1. CHECK MANUAL COMMAND FIRST
       db.query(
-        "SELECT status FROM irrigation WHERE zone=? ORDER BY id DESC LIMIT 1",
+        "SELECT status FROM irrigation_logs WHERE zone=? ORDER BY id DESC LIMIT 1",
         [zone],
         (err2, last) => {
 
@@ -191,7 +191,7 @@ app.get("/api/command", (req, res) => {
           // 🔥 SAVE HISTORY HERE
           db.query(
             "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
-            [zone, irrigate ? "ON" : "OFF", reason],
+            [zone, irrigate ? "SMART ON" : "SMART OFF", reason],
             (err3) => {
               if (err3) console.log("Log error:", err3);
             }
@@ -300,7 +300,7 @@ GoodTime: ${isGoodTime}
       if (score >= 2) {
 
         db.query(
-          "SELECT * FROM irrigation WHERE zone=? ORDER BY id DESC LIMIT 1",
+          "SELECT * FROM irrigation_logs WHERE zone=? ORDER BY id DESC LIMIT 1",
           [zone.zone],
           (err, last) => {
 
