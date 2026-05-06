@@ -407,6 +407,27 @@ Next irrigation: ${nextIrrigation.toLocaleString()}
     });
   });
 }
+app.get("/api/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const sendData = () => {
+    db.query("SELECT * FROM zones", (err, zones) => {
+      if (!err) {
+        res.write(`data: ${JSON.stringify(zones)}\n\n`);
+      }
+    });
+  };
+
+  // send every 3 seconds
+  const interval = setInterval(sendData, 3000);
+
+  // cleanup on disconnect
+  req.on("close", () => {
+    clearInterval(interval);
+  });
+});
 
 // ================= INTERVAL =================
 setInterval(autoIrrigation, 5000);
