@@ -145,6 +145,36 @@ app.post("/api/sensor", (req, res) => {
     }
   );
 });
+function shouldIrrigate(zone, weather = {}, forecast = []) {
+  let score = 0;
+
+  // 🌱 Moisture
+  score += Math.max(0, (60 - zone.moisture) * (40 / 60));
+
+  // 🌡️ Temperature
+  if (zone.temperature > 32) {
+    score += (zone.temperature - 32) * 2;
+  }
+
+  // 🌧️ Rain now
+  if (weather.rain) score -= 20;
+
+  // 🌦️ Forecast rain
+  const rainComing = forecast.slice(0, 3).some(f =>
+    f.condition?.toLowerCase().includes("rain")
+  );
+  if (rainComing) score -= 25;
+
+  // ⏱️ Time of day
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour <= 8) score += 10;
+  if (hour >= 11 && hour <= 15) score -= 15;
+
+  return {
+    irrigate: score > 40,
+    score
+  };
+}
 // 🎯 COMMAND FOR ESP32
 app.get("/api/command", (req, res) => {
   const zone = req.query.zone || 1;
@@ -179,7 +209,33 @@ app.get("/api/command", (req, res) => {
               reason = "MANUAL";
             } else {
               // 🤖 AUTO LOGIC
-              irrigate = (moisture < 40 || temperature > 32);
+              (async () => {
+  const weather = await getWeather();
+  const forecast = await getForecast();
+
+  const decision = shouldIrrigate(
+    { moisture, temperature },
+    weather,
+    forecast
+  );
+
+  irrigate = decision.irrigate;
+  reason = `Score: ${decision.score} | Moisture: ${moisture} | Temp: ${temperature}`;
+
+  console.log("🧠 SMART Decision:", zone, irrigate, decision.score);
+
+  // 🔥 SAVE LOG
+  db.query(
+    "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
+    [
+      zone,
+      irrigate ? "SMART ON" : "SMART OFF",
+      reason
+    ]
+  );
+
+  
+})();
             }
           } else {
             // 🤖 AUTO LOGIC (no manual history)
