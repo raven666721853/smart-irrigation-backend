@@ -458,9 +458,10 @@ app.get("/api/stream", (req, res) => {
   });
 });
 app.get("/api/water-stats", (req, res) => {
+
   const todayQuery = `
-    SELECT SUM(duration_seconds) as total 
-    FROM irrigation_logs 
+    SELECT SUM(duration_seconds) as total
+    FROM irrigation_logs
     WHERE DATE(created_at) = CURDATE()
   `;
 
@@ -474,14 +475,23 @@ app.get("/api/water-stats", (req, res) => {
   `;
 
   db.query(todayQuery, (err1, todayRes) => {
-    if (err1) return res.status(500).json(err1);
+
+    if (err1) {
+      console.log(err1);
+      return res.status(500).json(err1);
+    }
 
     db.query(weekQuery, (err2, weekRes) => {
-      if (err2) return res.status(500).json(err2);
 
-      const FLOW_RATE = 2; // L/min
+      if (err2) {
+        console.log(err2);
+        return res.status(500).json(err2);
+      }
+
+      const FLOW_RATE = 2;
 
       const todaySeconds = todayRes[0].total || 0;
+
       const todayLiters = (todaySeconds / 60) * FLOW_RATE;
 
       const weekly = weekRes.map(r => ({
@@ -493,10 +503,12 @@ app.get("/api/water-stats", (req, res) => {
         today: todayLiters,
         weekly
       });
-    });
-  });
-});
 
+    });
+
+  });
+
+});
 // ================= INTERVAL =================
 setInterval(autoIrrigation, 5000);
 
