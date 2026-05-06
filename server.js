@@ -1,9 +1,20 @@
+require("dotenv").config();
+require("./jobs/offlinedetector");
+const verifyToken = require("./middleware/veriftoken");
+const verifyESP32 = require("./middleware/verifesp32");
 const express = require("express");
 const cors = require("cors");
 const db = require("./db");
 const axios = require("axios");
-
+const rateLimit = require("express-rate-limit");
 const app = express();
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  message: "Too many requests",
+});
+
+app.use("/api", limiter);
 const activeIrrigation = {};
 const FLOW_RATE = 2; // liters per minute
 
@@ -18,13 +29,13 @@ console.log("🔥 NEW VERSION DEPLOYED");
 
 // 🔐 AUTH
 app.get("/", (req, res) => {
-  res.send("Backend is working 🚀");
+  res.send("Backend is working");
 });
 
 app.use("/api/auth", require("./routes/auth"));
 
 // 🌱 GET ZONES
-app.get("/api/zones", (req, res) => {
+app.get("/api/zones", verifyToken, (req, res) => {
   db.query(
     "SELECT zone, moisture, temperature FROM zones",
     (err, result) => {
@@ -99,7 +110,7 @@ app.post("/api/irrigation", (req, res) => {
 });
 
 // 📊 HISTORY
-app.get("/api/history", (req, res) => {
+app.get("/api/history", verifyToken, (req, res) => {
   db.query(
     "SELECT * FROM irrigation_logs ORDER BY created_at DESC",
     (err, result) => {
