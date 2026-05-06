@@ -4,6 +4,9 @@ const db = require("./db");
 const axios = require("axios");
 
 const app = express();
+const activeIrrigation = {};
+const FLOW_RATE = 2; // liters per minute
+
 
 app.use(cors());
 app.use(express.json());
@@ -242,19 +245,45 @@ app.get("/api/command", (req, res) => {
             irrigate = (moisture < 40 || temperature > 32);
           }
 
-          console.log("🤖 Decision:", zone, irrigate, reason);
+          const key = `zone_${zone}`;
 
-          // 🔥 SAVE HISTORY HERE
-          db.query(
-            "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
-            [zone, irrigate ? "SMART ON" : "SMART OFF", reason],
-            (err3) => {
-              if (err3) console.log("Log error:", err3);
-            }
-          );
- 
+// 💧 TRACK START / STOP
+if (irrigate) {
+  if (!activeIrrigation[key]) {
+    activeIrrigation[key] = {
+      startTime: Date.now(),
+    };
+  }
+} else {
+  if (activeIrrigation[key]) {
+    const duration = Math.round(
+      (Date.now() - activeIrrigation[key].startTime) / 1000
+    );
 
-          res.json({ irrigate });
+    // 🔥 UPDATE LAST LOG WITH DURATION
+    db.query(
+      `UPDATE irrigation_logs 
+       SET duration_seconds=? 
+       WHERE zone=? 
+       ORDER BY id DESC 
+       LIMIT 1`,
+      [duration, zone]
+    );
+
+    console.log(`💧 Zone ${zone} used water for ${duration}s`);
+
+    delete activeIrrigation[key];
+  }
+}
+
+// 📝 SAVE NEW LOG
+db.query(
+  "INSERT INTO irrigation_logs (zone, status, reason) VALUES (?, ?, ?)",
+  [zone, irrigate ? "SMART ON" : "SMART OFF", reason]
+);
+
+// ✅ SEND RESPONSE (ONLY HERE)
+res.json({ irrigate });
         }
       );
     }
@@ -426,6 +455,45 @@ app.get("/api/stream", (req, res) => {
   // cleanup on disconnect
   req.on("close", () => {
     clearInterval(interval);
+  });
+});
+app.get("/api/water-stats", (req, res) => {
+  const todayQuery = `
+    SELECT SUM(duration_seconds) as total 
+    FROM irrigation_logs 
+    WHERE DATE(created_at) = CURDATE()
+  `;
+
+  const weekQuery = `
+    SELECT DATE(created_at) as day,
+           SUM(duration_seconds) as total
+    FROM irrigation_logs
+    WHERE created_at >= NOW() - INTERVAL 7 DAY
+    GROUP BY day
+    ORDER BY day ASC
+  `;
+
+  db.query(todayQuery, (err1, todayRes) => {
+    if (err1) return res.status(500).json(err1);
+
+    db.query(weekQuery, (err2, weekRes) => {
+      if (err2) return res.status(500).json(err2);
+
+      const FLOW_RATE = 2; // L/min
+
+      const todaySeconds = todayRes[0].total || 0;
+      const todayLiters = (todaySeconds / 60) * FLOW_RATE;
+
+      const weekly = weekRes.map(r => ({
+        day: r.day,
+        liters: (r.total / 60) * FLOW_RATE
+      }));
+
+      res.json({
+        today: todayLiters,
+        weekly
+      });
+    });
   });
 });
 
