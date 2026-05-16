@@ -56,18 +56,23 @@ app.use("/api/auth", require("./routes/auth"));
 
 // Health & Export (new)
 app.use("/api/health",     require("./routes/health"));
+app.use("/api/farms", require("./routes/farms"));
 app.use("/api/export/csv", require("./routes/export"));
 
 // ── GET /api/zones ──────────────────────────────────────────
 // NOW returns last_seen so the frontend can show offline badge
 app.get("/api/zones", verifyToken, (req, res) => {
-  db.query(
-    "SELECT zone, moisture, temperature, last_seen FROM zones",
-    (err, result) => {
-      if (err) return res.status(500).send("DB error");
-      res.json(result);
-    }
-  );
+  // Optional: filter by farm if ?farm=id is passed
+  const farmId = req.query.farm;
+  const query = farmId
+    ? "SELECT zone, name, moisture, temperature, last_seen, farm_id FROM zones WHERE farm_id = ? ORDER BY zone ASC"
+    : "SELECT zone, name, moisture, temperature, last_seen, farm_id FROM zones ORDER BY zone ASC";
+  const params = farmId ? [farmId] : [];
+ 
+  db.query(query, params, (err, result) => {
+    if (err) return res.status(500).send("DB error");
+    res.json(result);
+  });
 });
 
 // ── POST /api/sensor ─────────────────────────────────────────
