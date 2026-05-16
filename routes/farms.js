@@ -1,138 +1,128 @@
-// ============================================================
-// FILE: backend/routes/farms.js  (NEW FILE)
-// WHAT: Full CRUD for farms + zones management
-//       All routes protected by JWT
-// ============================================================
-
-const express     = require("express");
-const router      = express.Router();
-const db          = require("../db");
+// FILE: backend/routes/farms.js
+const express = require("express");
+const router  = express.Router();
+const db      = require("../db");
 const verifyToken = require("../middleware/veriftoken");
 
-// ── GET /api/farms ───────────────────────────────────────────
-// Returns all farms with their zone count
-router.get("/", verifyToken, (req, res) => {
+// Apply JWT to all farm routes
+router.use(verifyToken);
+
+// ── GET /api/farms ─────────────────────────────────────────────
+// Returns all farms with zone count
+router.get("/", (req, res) => {
   db.query(
-    `SELECT f.*, 
-            COUNT(z.id) as zone_count
+    `SELECT f.*, COUNT(z.zone) AS zone_count
      FROM farms f
      LEFT JOIN zones z ON z.farm_id = f.id
      GROUP BY f.id
      ORDER BY f.created_at DESC`,
-    (err, result) => {
+    (err, results) => {
       if (err) {
-        console.error("Farms fetch error:", err);
-        return res.status(500).json({ error: "DB error" });
+        console.error("GET /farms error:", err);
+        return res.status(500).json({ error: "DB error", detail: err.message });
       }
-      res.json(result);
+      res.json(results);
     }
   );
 });
 
-// ── POST /api/farms ──────────────────────────────────────────
+// ── POST /api/farms ────────────────────────────────────────────
 // Create a new farm
-router.post("/", verifyToken, (req, res) => {
+router.post("/", (req, res) => {
   const { name, location, lat, lng } = req.body;
-  if (!name) return res.status(400).json({ error: "Farm name is required" });
-
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "Farm name is required" });
+  }
   db.query(
     "INSERT INTO farms (name, location, lat, lng) VALUES (?, ?, ?, ?)",
-    [name, location || null, lat || null, lng || null],
+    [name.trim(), location || null, lat || null, lng || null],
     (err, result) => {
       if (err) {
-        console.error("Farm create error:", err);
-        return res.status(500).json({ error: "DB error" });
+        console.error("POST /farms error:", err);
+        return res.status(500).json({ error: "DB error", detail: err.message });
       }
-      res.json({ success: true, id: result.insertId, name, location, lat, lng });
+      res.status(201).json({ id: result.insertId, name, location, lat, lng });
     }
   );
 });
 
-// ── PUT /api/farms/:id ───────────────────────────────────────
+// ── PUT /api/farms/:id ─────────────────────────────────────────
 // Update a farm
-router.put("/:id", verifyToken, (req, res) => {
+router.put("/:id", (req, res) => {
   const { name, location, lat, lng } = req.body;
-  const { id } = req.params;
-
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "Farm name is required" });
+  }
   db.query(
     "UPDATE farms SET name=?, location=?, lat=?, lng=? WHERE id=?",
-    [name, location || null, lat || null, lng || null, id],
+    [name.trim(), location || null, lat || null, lng || null, req.params.id],
     (err) => {
       if (err) {
-        console.error("Farm update error:", err);
-        return res.status(500).json({ error: "DB error" });
+        console.error("PUT /farms error:", err);
+        return res.status(500).json({ error: "DB error", detail: err.message });
       }
       res.json({ success: true });
     }
   );
 });
 
-// ── DELETE /api/farms/:id ────────────────────────────────────
-// Delete a farm (zones become unassigned)
-router.delete("/:id", verifyToken, (req, res) => {
-  const { id } = req.params;
-
-  // Unassign zones first
-  db.query("UPDATE zones SET farm_id = NULL WHERE farm_id = ?", [id], (err) => {
+// ── DELETE /api/farms/:id ──────────────────────────────────────
+// Delete a farm (unassigns its zones)
+router.delete("/:id", (req, res) => {
+  db.query("UPDATE zones SET farm_id = NULL WHERE farm_id = ?", [req.params.id], (err) => {
     if (err) return res.status(500).json({ error: "DB error" });
-
-    db.query("DELETE FROM farms WHERE id = ?", [id], (err2) => {
+    db.query("DELETE FROM farms WHERE id = ?", [req.params.id], (err2) => {
       if (err2) return res.status(500).json({ error: "DB error" });
       res.json({ success: true });
     });
   });
 });
 
-// ── GET /api/farms/:id/zones ─────────────────────────────────
-// Get all zones for a specific farm
-router.get("/:id/zones", verifyToken, (req, res) => {
-  db.query(
-    "SELECT zone, name, moisture, temperature, last_seen, farm_id FROM zones WHERE farm_id = ? ORDER BY zone ASC",
-    [req.params.id],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: "DB error" });
-      res.json(result);
-    }
-  );
-});
-
-// ── POST /api/farms/:id/zones ────────────────────────────────
-// Add a new zone to a farm
-router.post("/:id/zones", verifyToken, (req, res) => {
+// ── POST /api/farms/:id/zones ──────────────────────────────────
+// Assign a zone to a farm
+router.post("/:id/zones", (req, res) => {
   const { zone, name } = req.body;
-  const farm_id = req.params.id;
+  if (!zone) return res.status(400).json({ error: "Zone number required" });
 
-  if (!zone) return res.status(400).json({ error: "Zone number is required" });
-
-  // Check if zone number already exists
-  db.query("SELECT id FROM zones WHERE zone = ?", [zone], (err, existing) => {
+  // Check if zone row exists
+  db.query("SELECT zone FROM zones WHERE zone = ?", [zone], (err, rows) => {
     if (err) return res.status(500).json({ error: "DB error" });
-    if (existing.length > 0) {
-      return res.status(409).json({ error: `Zone ${zone} already exists` });
-    }
 
-    db.query(
-      "INSERT INTO zones (zone, name, moisture, temperature, farm_id, last_seen) VALUES (?, ?, 50, 25, ?, NOW())",
-      [zone, name || `Zone ${zone}`, farm_id],
-      (err2, result) => {
-        if (err2) {
-          console.error("Zone create error:", err2);
-          return res.status(500).json({ error: "DB error" });
+    if (rows.length === 0) {
+      // Zone doesn't exist yet — create it
+      db.query(
+        "INSERT INTO zones (zone, name, moisture, temperature, farm_id) VALUES (?, ?, 0, 0, ?)",
+        [zone, name || `Zone ${zone}`, req.params.id],
+        (err2) => {
+          if (err2) {
+            if (err2.code === "ER_DUP_ENTRY") {
+              return res.status(409).json({ error: `Zone ${zone} already exists` });
+            }
+            return res.status(500).json({ error: "DB error", detail: err2.message });
+          }
+          res.status(201).json({ success: true });
         }
-        res.json({ success: true, id: result.insertId, zone, name: name || `Zone ${zone}`, farm_id });
-      }
-    );
+      );
+    } else {
+      // Zone exists — just assign it to this farm
+      db.query(
+        "UPDATE zones SET farm_id = ?, name = COALESCE(?, name) WHERE zone = ?",
+        [req.params.id, name || null, zone],
+        (err3) => {
+          if (err3) return res.status(500).json({ error: "DB error" });
+          res.json({ success: true });
+        }
+      );
+    }
   });
 });
 
-// ── DELETE /api/farms/:farmId/zones/:zoneNum ─────────────────
-// Remove a zone from a farm
-router.delete("/:farmId/zones/:zoneNum", verifyToken, (req, res) => {
-  const { farmId, zoneNum } = req.params;
-
+// ── DELETE /api/farms/:id/zones/:zone ─────────────────────────
+// Unassign a zone from a farm
+router.delete("/:id/zones/:zone", (req, res) => {
   db.query(
-    "DELETE FROM zones WHERE zone = ? AND farm_id = ?",
-    [zoneNum, farmId],
+    "UPDATE zones SET farm_id = NULL WHERE zone = ? AND farm_id = ?",
+    [req.params.zone, req.params.id],
     (err) => {
       if (err) return res.status(500).json({ error: "DB error" });
       res.json({ success: true });
