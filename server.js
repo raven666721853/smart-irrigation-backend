@@ -16,24 +16,39 @@
 require("dotenv").config();
 require("./jobs/offlinedetector");
 
-const verifyToken  = require("./middleware/veriftoken");
-const verifyESP32  = require("./middleware/verifyESP32");
+const verifyToken = require("./middleware/veriftoken");
+const verifyESP32 = require("./middleware/verifyESP32");
 
-const express  = require("express");
-const cors     = require("cors");
-const db       = require("./db");
-const axios    = require("axios");
+const express   = require("express");
+const cors      = require("cors");
+const db        = require("./db");
+const axios     = require("axios");
 const rateLimit = require("express-rate-limit");
 
 const app = express();
 
-// ── Rate limiter ─────────────────────────────────────────────
+// ── CORS must be FIRST — before rate limiter ─────────────────
+const corsOptions = {
+  origin: [
+    "https://irrigation-frontend-git-main-takihamdi027-5518s-projects.vercel.app",
+    "http://localhost:3000"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+  credentials: true
+};
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+app.use(express.json());
+
+// ── Rate limiter AFTER cors ──────────────────────────────────
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
   message: "Too many requests",
 });
 app.use("/api", limiter);
+
 
 // ── Middleware ───────────────────────────────────────────────
 app.use(cors({
