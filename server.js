@@ -36,8 +36,18 @@ const limiter = rateLimit({
 app.use("/api", limiter);
 
 // ── Middleware ───────────────────────────────────────────────
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: [
+    "https://irrigation-frontend-git-main-takihamdi027-5518s-projects.vercel.app",
+    "http://localhost:3000"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+  credentials: true
+}));
+
+// Handle preflight requests explicitly
+app.options("*", cors());
 
 // ── Active irrigation tracker ────────────────────────────────
 const activeIrrigation = {};
