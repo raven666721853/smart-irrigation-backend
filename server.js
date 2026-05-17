@@ -48,6 +48,7 @@ app.use(cors({
 
 // Handle preflight requests explicitly
 app.options("*", cors());
+app.use(express.json());
 
 // ── Active irrigation tracker ────────────────────────────────
 const activeIrrigation = {};
