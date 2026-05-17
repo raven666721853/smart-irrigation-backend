@@ -23,35 +23,65 @@ router.post("/register", async (req, res) => {
 
 
 // 🔐 LOGIN
-router.post("/login", (req, res) => {
-  const { email, password } = req.body;
+const express = require("express");
+const router = express.Router();
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const db = require("../config/db");
 
-  db.query(
-    "SELECT * FROM users WHERE email = ?",
-    [email],
-    async (err, result) => {
-      if (err) return res.status(500).send("DB error");
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
 
-      if (result.length === 0) {
-        return res.status(401).send("User not found");
-      }
+    const [rows] = await db.query(
+      "SELECT * FROM users WHERE email = ?",
+      [email]
+    );
 
-      const user = result[0];
-
-      const match = await bcrypt.compare(password, user.password);
-
-      if (!match) {
-        return res.status(401).send("Wrong password");
-      }
-
-      const token = jwt.sign(
-  { id: user.id, name: user.name, email: user.email },
-  process.env.JWT_SECRET || "SECRET_KEY"
-);
-
-      res.json({ token, user });
+    if (rows.length === 0) {
+      return res.status(401).json({
+        message: "User not found"
+      });
     }
-  );
+
+    const user = rows[0];
+
+    const validPassword = await bcrypt.compare(
+      password,
+      user.password
+    );
+
+    if (!validPassword) {
+      return res.status(401).json({
+        message: "Wrong password"
+      });
+    }
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role: user.role
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role
+      }
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      message: "Server error"
+    });
+  }
 });
 
 module.exports = router;
