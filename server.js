@@ -122,26 +122,42 @@ app.get("/api/forecast", async (req, res) => {
 });
 
 // ── POST /api/irrigation ─────────────────────────────────────
+// ── POST /api/irrigation ─────────────────────────────────────
 app.post("/api/irrigation", verifyToken, (req, res) => {
-  const { zone, status } = req.body;
-  if (!zone || !status) return res.status(400).json({ error: "Missing zone or status" });
+  const { zone, action, status } = req.body;
+  if (!zone) return res.status(400).json({ error: "Missing zone" });
+
+  // support both { action: "on"/"off" } and legacy { status: "MANUAL ON" }
+  let finalStatus;
+  if (action) {
+    finalStatus = action.toLowerCase() === "on" ? "MANUAL ON" : "MANUAL OFF";
+  } else if (status) {
+    finalStatus = status;
+  } else {
+    return res.status(400).json({ error: "Missing action or status" });
+  }
+
   db.query(
     "INSERT INTO irrigation_logs (zone, status, reason, decision_score) VALUES (?, ?, ?, ?)",
-    [zone, status, "MANUAL", null],
+    [zone, finalStatus, "MANUAL", null],
     (err) => { if (err) console.log(err); }
   );
   res.json({ success: true });
 });
 
 // ── GET /api/history ─────────────────────────────────────────
+// ── GET /api/history ─────────────────────────────────────────
 app.get("/api/history", verifyToken, (req, res) => {
-  db.query(
-    "SELECT * FROM irrigation_logs ORDER BY created_at DESC",
-    (err, result) => {
-      if (err) { console.log("❌ HISTORY ERROR:", err); return res.status(500).json(err); }
-      res.json(result);
-    }
-  );
+  const filter = req.query.filter;
+  let query = "SELECT * FROM irrigation_logs";
+  if (filter === "auto")   query += " WHERE status LIKE 'SMART%'";
+  if (filter === "manual") query += " WHERE status LIKE 'MANUAL%'";
+  query += " ORDER BY created_at DESC LIMIT 200";
+
+  db.query(query, (err, result) => {
+    if (err) { console.log("❌ HISTORY ERROR:", err); return res.status(500).json(err); }
+    res.json(result);
+  });
 });
 
 // ── GET /api/alerts ──────────────────────────────────────────
