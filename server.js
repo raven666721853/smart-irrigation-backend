@@ -1,376 +1,59 @@
 require("dotenv").config();
-require("./jobs/offlinedetector");
 
-const verifyToken = require("./middleware/veriftoken");
+const express = require("express");
+const cors = require("cors");
+const db = require("./db");
+
+// Start cron jobs
+require("./jobs/offlineDetector");
+
+const verifyToken = require("./middleware/verifyToken");
 const verifyESP32 = require("./middleware/verifyESP32");
 
-const express   = require("express");
-const cors      = require("cors");
-const db        = require("./db");
-const axios     = require("axios");
-const rateLimit = require("express-rate-limit");
-
 const app = express();
-app.set("trust proxy", 1);
 
-// ── CORS — must be first, before everything ──────────────────
-const corsOptions = {
-  origin: [
-    "https://irrigation-frontend-git-main-takihamdi027-5518s-projects.vercel.app",
-    "http://localhost:3000",
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
-  credentials: true,
-};
-app.use(cors(corsOptions));
-app.options("/{*path}", cors(corsOptions));
+// ─── CORS ─────────────────────────────────────────────────────
+const allowedOrigins = [
+  process.env.FRONTEND_URL,        // e.g. https://your-app.vercel.app
+  "http://localhost:5173",          // Vite dev server
+  "http://localhost:3000",
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, Postman)
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
-// ── Rate limiter — after CORS ────────────────────────────────
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
-  message: "Too many requests",
+// ─── Routes ───────────────────────────────────────────────────
+app.use("/api/auth",   require("./routes/auth"));
+app.use("/api/health", require("./routes/health"));
+app.use("/api/farms",  verifyToken, require("./routes/farms"));
+app.use("/api/admin",  verifyToken, require("./routes/admin"));
+
+// ─── 404 ──────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: "Route not found" });
 });
-app.use("/api", limiter);
 
-// ── Active irrigation tracker ────────────────────────────────
-const activeIrrigation = {};
-const FLOW_RATE = 2;
-
-// ============================================================
-// ROUTES
-// ============================================================
-console.log("🔥 NEW VERSION DEPLOYED");
-
-app.get("/", (req, res) => res.send("Backend is working"));
-
-app.use("/api/auth",      require("./routes/auth"));
-app.use("/api/health",    require("./routes/health"));
-app.use("/api/farms",     require("./routes/farms"));
-app.use("/api/export/csv", require("./routes/export"));
-
-// ── GET /api/zones ───────────────────────────────────────────
-app.get("/api/zones", verifyToken, (req, res) => {
-  const farmId = req.query.farm;
-  const query = farmId
-    ? "SELECT zone, name, moisture, temperature, last_seen, farm_id FROM zones WHERE farm_id = ? ORDER BY zone ASC"
-    : "SELECT zone, name, moisture, temperature, last_seen, farm_id FROM zones ORDER BY zone ASC";
-  const params = farmId ? [farmId] : [];
-  db.query(query, params, (err, result) => {
-    if (err) return res.status(500).send("DB error");
-    res.json(result);
+// ─── Global error handler (required for Express 5 async errors) ─
+app.use((err, req, res, next) => {
+  console.error(`[${new Date().toISOString()}] ❌ Unhandled error:`, err.message);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal server error",
   });
 });
 
-// ── POST /api/sensor ─────────────────────────────────────────
-app.post("/api/sensor", verifyESP32, (req, res) => {
-  const { zone, temperature, moisture } = req.body;
-  if (!zone) return res.status(400).send("Missing zone");
-  db.query(
-    "UPDATE zones SET temperature=?, moisture=?, last_seen=NOW() WHERE zone=?",
-    [temperature, moisture, zone],
-    (err) => {
-      if (err) { console.log("DB error:", err); return res.status(500).send("DB error"); }
-      console.log("📡 Sensor update:", zone, temperature, moisture);
-      res.json({ message: "Updated successfully" });
-    }
-  );
+// ─── Start ────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
-
-// ── GET /api/weather ─────────────────────────────────────────
-app.get("/api/weather", async (req, res) => {
-  const lat = req.query.lat || 34.74;
-  const lon = req.query.lon || 10.76;
-  try {
-    const response = await axios.get(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${process.env.WEATHER_API_KEY}&units=metric`
-    );
-    res.json({
-      city:      response.data.name,
-      temp:      response.data.main.temp,
-      humidity:  response.data.main.humidity,
-      rain:      response.data.weather[0].main.toLowerCase().includes("rain"),
-      condition: response.data.weather[0].main,
-    });
-  } catch (err) {
-    console.log("Weather error:", err.message);
-    res.status(500).send("Weather error");
-  }
-});
-
-// ── GET /api/forecast ────────────────────────────────────────
-app.get("/api/forecast", async (req, res) => {
-  const lat = req.query.lat || 34.74;
-  const lon = req.query.lon || 10.76;
-  try {
-    const response = await axios.get(
-      `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${process.env.WEATHER_API_KEY}&units=metric`
-    );
-    res.json(
-      response.data.list.map((f) => ({
-        time:      f.dt,
-        temp:      f.main.temp,
-        condition: f.weather[0].main,
-      }))
-    );
-  } catch (err) {
-    console.log("Forecast error:", err.message);
-    res.status(500).send("Forecast error");
-  }
-});
-
-// ── POST /api/irrigation ─────────────────────────────────────
-// ── POST /api/irrigation ─────────────────────────────────────
-app.post("/api/irrigation", verifyToken, (req, res) => {
-  const { zone, action, status } = req.body;
-  if (!zone) return res.status(400).json({ error: "Missing zone" });
-
-  // support both { action: "on"/"off" } and legacy { status: "MANUAL ON" }
-  let finalStatus;
-  if (action) {
-    finalStatus = action.toLowerCase() === "on" ? "MANUAL ON" : "MANUAL OFF";
-  } else if (status) {
-    finalStatus = status;
-  } else {
-    return res.status(400).json({ error: "Missing action or status" });
-  }
-
-  db.query(
-    "INSERT INTO irrigation_logs (zone, status, reason, decision_score) VALUES (?, ?, ?, ?)",
-    [zone, finalStatus, "MANUAL", null],
-    (err) => { if (err) console.log(err); }
-  );
-  res.json({ success: true });
-});
-
-// ── GET /api/history ─────────────────────────────────────────
-// ── GET /api/history ─────────────────────────────────────────
-app.get("/api/history", verifyToken, (req, res) => {
-  const filter = req.query.filter;
-  let query = "SELECT * FROM irrigation_logs";
-  if (filter === "auto")   query += " WHERE status LIKE 'SMART%'";
-  if (filter === "manual") query += " WHERE status LIKE 'MANUAL%'";
-  query += " ORDER BY created_at DESC LIMIT 200";
-
-  db.query(query, (err, result) => {
-    if (err) { console.log("❌ HISTORY ERROR:", err); return res.status(500).json(err); }
-    res.json(result);
-  });
-});
-
-// ── GET /api/alerts ──────────────────────────────────────────
-app.get("/api/alerts", (req, res) => {
-  db.query(
-    `SELECT zone, moisture, 'DRY' as type FROM zones WHERE moisture < 40
-     UNION
-     SELECT zone, 0 as moisture, 'SMART' as type FROM irrigation_logs
-     WHERE status = 'SMART ON' AND created_at >= NOW() - INTERVAL 1 MINUTE`,
-    (err, result) => {
-      if (err) return res.status(500).send("DB error");
-      res.json(result);
-    }
-  );
-});
-
-// ── GET /api/command ─────────────────────────────────────────
-app.get("/api/command", verifyESP32, (req, res) => {
-  const zone = req.query.zone || 1;
-  db.query("SELECT moisture, temperature FROM zones WHERE zone=?", [zone], (err, result) => {
-    if (err || result.length === 0) return res.json({ irrigate: false });
-
-    const { moisture, temperature } = result[0];
-
-    db.query(
-      "SELECT status FROM irrigation_logs WHERE zone=? ORDER BY id DESC LIMIT 1",
-      [zone],
-      (err2, last) => {
-        let irrigate = false;
-        let reason   = "AUTO";
-        let score    = null;
-
-        if (last && last.length) {
-          const lastStatus = last[0].status;
-          if (lastStatus === "MANUAL ON") {
-            irrigate = true; reason = "MANUAL";
-          } else if (lastStatus === "MANUAL OFF") {
-            irrigate = false; reason = "MANUAL";
-          } else {
-            (async () => {
-              const weather  = await getWeather();
-              const forecast = await getForecast();
-              const decision = shouldIrrigate({ moisture, temperature }, weather, forecast);
-              irrigate = decision.irrigate;
-              score    = decision.score;
-              reason   = `Score: ${decision.score} | Moisture: ${moisture} | Temp: ${temperature}`;
-              console.log("🧠 SMART Decision:", zone, irrigate, decision.score);
-              db.query(
-                "INSERT INTO irrigation_logs (zone, status, reason, decision_score) VALUES (?, ?, ?, ?)",
-                [zone, irrigate ? "SMART ON" : "SMART OFF", reason, score]
-              );
-            })();
-          }
-        } else {
-          irrigate = moisture < 40 || temperature > 32;
-        }
-
-        const key = `zone_${zone}`;
-        if (irrigate) {
-          if (!activeIrrigation[key]) activeIrrigation[key] = { startTime: Date.now() };
-        } else {
-          if (activeIrrigation[key]) {
-            const duration = Math.round((Date.now() - activeIrrigation[key].startTime) / 1000);
-            db.query(
-              `UPDATE irrigation_logs SET duration_seconds=? WHERE zone=? ORDER BY id DESC LIMIT 1`,
-              [duration, zone]
-            );
-            console.log(`💧 Zone ${zone} used water for ${duration}s`);
-            delete activeIrrigation[key];
-          }
-        }
-
-        res.json({ irrigate });
-      }
-    );
-  });
-});
-
-// ── GET /api/stream (SSE) ────────────────────────────────────
-app.get("/api/stream", (req, res) => {
-  res.setHeader("Content-Type",  "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection",    "keep-alive");
-  const send = () => {
-    db.query("SELECT zone, moisture, temperature, last_seen FROM zones", (err, zones) => {
-      if (!err) res.write(`data: ${JSON.stringify(zones)}\n\n`);
-    });
-  };
-  const interval = setInterval(send, 3000);
-  req.on("close", () => clearInterval(interval));
-});
-
-// ── GET /api/water-stats ─────────────────────────────────────
-app.get("/api/water-stats", verifyToken, (req, res) => {
-  const todayQuery = `SELECT SUM(duration_seconds) as total FROM irrigation_logs WHERE DATE(created_at) = CURDATE()`;
-  const weekQuery  = `SELECT DATE(created_at) as day, SUM(duration_seconds) as total FROM irrigation_logs WHERE created_at >= NOW() - INTERVAL 7 DAY GROUP BY day ORDER BY day ASC`;
-
-  db.query(todayQuery, (err1, todayRes) => {
-    if (err1) return res.status(500).json(err1);
-    db.query(weekQuery, (err2, weekRes) => {
-      if (err2) return res.status(500).json(err2);
-      const todaySeconds = todayRes[0].total || 0;
-      const todayLiters  = (todaySeconds / 60) * FLOW_RATE;
-      const weekly       = weekRes.map((r) => ({
-        day:    r.day,
-        liters: ((r.total || 0) / 60) * FLOW_RATE,
-      }));
-      res.json({ today: todayLiters, weekly });
-    });
-  });
-});
-
-// ============================================================
-// DECISION ENGINE
-// ============================================================
-function shouldIrrigate(zone, weather = {}, forecast = []) {
-  let score = 0;
-  if (zone.moisture < 60)    score += Math.max(0, (60 - zone.moisture) * 0.67);
-  if (zone.temperature > 32) score += (zone.temperature - 32) * 2;
-  if (weather.rain)          score -= 20;
-  const rainComing = forecast.slice(0, 3).some((f) => f.condition?.toLowerCase().includes("rain"));
-  if (rainComing) score -= 25;
-  const hour = new Date().getHours();
-  if (hour >= 5  && hour <= 8)  score += 10;
-  if (hour >= 11 && hour <= 15) score -= 15;
-  return { irrigate: score > 40, score: Math.round(score) };
-}
-
-// ============================================================
-// WEATHER HELPERS
-// ============================================================
-async function getWeather(lat = 34.74, lon = 10.76) {
-  try {
-    const res = await axios.get(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${process.env.WEATHER_API_KEY}&units=metric`
-    );
-    return {
-      temp:     res.data?.main?.temp     ?? 0,
-      humidity: res.data?.main?.humidity ?? 0,
-      rain:     res.data?.weather?.[0]?.main?.toLowerCase().includes("rain") || false,
-    };
-  } catch (err) {
-    console.log("Weather error:", err.message);
-    return { temp: 0, humidity: 0, rain: false };
-  }
-}
-
-async function getForecast(lat = 34.74, lon = 10.76) {
-  try {
-    const res = await axios.get(
-      `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${process.env.WEATHER_API_KEY}&units=metric`
-    );
-    return res.data.list;
-  } catch (err) {
-    console.log("Forecast error:", err.message);
-    return [];
-  }
-}
-
-// ============================================================
-// AUTO IRRIGATION CRON (every 5 seconds)
-// ============================================================
-async function autoIrrigation() {
-  const weather  = await getWeather();
-  const forecast = await getForecast();
-
-  db.query("SELECT zone, moisture, temperature FROM zones", (err, zones) => {
-    if (err) return;
-    zones.forEach((zone) => {
-      let score = 0;
-      if (zone.moisture < 35)      score += 2;
-      else if (zone.moisture < 45) score += 1;
-      if (zone.temperature > 32)   score += 1;
-
-      const humidity = weather?.humidity ?? 0;
-      const rain     = weather?.rain     ?? false;
-      if (humidity < 50) score += 1;
-      if (rain)          score -= 3;
-
-      const hour = new Date().getHours();
-      console.log(`Zone ${zone.zone} | Score: ${score} | Hour: ${hour}`);
-
-      if (score >= 2) {
-        db.query(
-          "SELECT * FROM irrigation_logs WHERE zone=? ORDER BY id DESC LIMIT 1",
-          [zone.zone],
-          (err, last) => {
-            if (err) return;
-            if (last.length) {
-              const diffMinutes = (new Date() - new Date(last[0].created_at)) / 1000 / 60;
-              if (diffMinutes < 0.2) {
-                console.log(`⛔ Zone ${zone.zone} skipped (cooldown)`);
-                return;
-              }
-            }
-            const reason = `Moisture: ${zone.moisture}% | Temp: ${zone.temperature}°C | Humidity: ${humidity}% | Rain: ${rain} | Score: ${score}`;
-            console.log(`✅ SMART irrigation → Zone ${zone.zone}`);
-            db.query(
-              "INSERT INTO irrigation_logs (zone, status, reason, decision_score) VALUES (?, ?, ?, ?)",
-              [zone.zone, "SMART ON", reason, score]
-            );
-            db.query("UPDATE zones SET moisture = moisture + 10 WHERE zone = ?", [zone.zone]);
-          }
-        );
-      }
-    });
-  });
-}
-
-setInterval(autoIrrigation, 5000);
-
-// ============================================================
-// SERVER START
-// ============================================================
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
