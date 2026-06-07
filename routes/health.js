@@ -1,10 +1,3 @@
-// ============================================================
-// FILE: backend/routes/health.js
-// WHAT: GET /api/health
-//       Returns system health: DB connectivity + uptime.
-//       No auth required (monitoring tools need open access).
-// ============================================================
-
 const express = require("express");
 const router  = express.Router();
 const db      = require("../db");
