@@ -32,7 +32,7 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
   credentials: true,
 }));
-app.options("*", cors());
+app.options("/{*path}", cors());
 app.use(express.json());
 
 // ── Rate limiter ─────────────────────────────────────────────
