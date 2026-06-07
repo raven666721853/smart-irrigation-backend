@@ -1,14 +1,7 @@
-// ============================================================
-// FILE: backend/routes/export.js
-// WHAT: GET /api/export/csv
-//       Streams irrigation_logs as a downloadable CSV file.
-//       Protected by JWT (same as /api/history).
-// ============================================================
-
 const express  = require("express");
 const router   = express.Router();
 const db       = require("../db");
-const verifyToken = require("../middleware/veriftoken");
+const verifyToken = require("../middleware/verifyToken");
 
 router.get("/", verifyToken, (req, res) => {
   db.query(
